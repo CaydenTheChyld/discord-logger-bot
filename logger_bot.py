@@ -182,6 +182,20 @@ async def giveaway(interaction: discord.Interaction, duration: str, winners: int
         else:
             await interaction.channel.send("❌ Not enough participants for the giveaway.")
 
+# ====================== SYNC COMMAND (Owner Only) ======================
+@client.tree.command(name="sync", description="Force sync all slash commands (Owner only)")
+async def sync_commands(interaction: discord.Interaction):
+    if interaction.user.id != 584241050973896736:
+        return await interaction.response.send_message("❌ You are not the bot owner.", ephemeral=True)
+    
+    await interaction.response.send_message("🔄 Syncing commands... This may take a few seconds.", ephemeral=True)
+    
+    try:
+        await client.tree.sync(guild=interaction.guild)
+        await interaction.followup.send("✅ All slash commands have been synced in this server!", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Sync failed: {e}", ephemeral=True)
+
 # ====================== EVENTS ======================
 @client.event
 async def on_ready():
