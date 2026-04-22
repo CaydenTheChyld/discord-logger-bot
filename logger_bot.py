@@ -51,8 +51,6 @@ class LoggingBot(discord.Client):
 client = LoggingBot()
 
 # ====================== COMMANDS ======================
-# (All your commands + /automod + fixed /sync are here)
-
 @client.tree.command(name="setlog", description="Set log channel")
 @app_commands.choices(log_type=[app_commands.Choice(name=n, value=v) for n, v in [
     ("Deleted Messages", "message"), ("Message Edits", "edit"), ("Bulk Deletes", "bulk"),
@@ -89,24 +87,98 @@ async def stats(interaction: discord.Interaction):
     embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
     await interaction.response.send_message(embed=embed)
 
-# ... (Reaction Roles, Ticket, Giveaway, Sync, Automod are the same as before)
+@client.tree.command(name="reactionrole", description="Create a reaction role message")
+@app_commands.describe(emoji="Emoji to react with", role="Role to give")
+async def reactionrole(interaction: discord.Interaction, emoji: str, role: discord.Role):
+    if interaction.guild is None: return await interaction.response.send_message("❌ Only in servers.", ephemeral=True)
+    embed = discord.Embed(title="🎟️ Reaction Roles", description="React with the emoji below to get the role!", color=discord.Color.gold())
+    msg = await interaction.channel.send(embed=embed)
+    await msg.add_reaction(emoji)
+    if msg.id not in client.reaction_roles:
+        client.reaction_roles[msg.id] = {}
+    client.reaction_roles[msg.id][str(emoji)] = role.id
+    await client.save_config()
+    await interaction.response.send_message(f"✅ Reaction role created! React with {emoji} to get **{role.name}**.", ephemeral=True)
 
-# Fixed Sync
+# Ticket System
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.green, emoji="🎟️")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        member = interaction.user
+        ticket_channel = await guild.create_text_channel(
+            f"ticket-{member.name}",
+            topic=f"Ticket for {member.name} | Created: {datetime.utcnow().strftime('%Y-%m-%d')}",
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            }
+        )
+        await ticket_channel.send(f"{member.mention} Welcome to your ticket!\nUse `/ticket close` when done.")
+        await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
+
+@client.tree.command(name="ticket", description="Ticket commands")
+@app_commands.choices(action=[app_commands.Choice(name="Setup Panel", value="setup"), app_commands.Choice(name="Close Ticket", value="close")])
+async def ticket_cmd(interaction: discord.Interaction, action: str):
+    if interaction.guild is None: return await interaction.response.send_message("❌ Only in servers.", ephemeral=True)
+    if action == "setup":
+        embed = discord.Embed(title="Support Tickets", description="Click the button below to open a ticket!", color=discord.Color.blue())
+        await interaction.channel.send(embed=embed, view=TicketView())
+        await interaction.response.send_message("✅ Ticket panel created!", ephemeral=True)
+    elif action == "close":
+        if "ticket-" in interaction.channel.name:
+            await interaction.response.send_message("✅ Closing ticket...", ephemeral=True)
+            await asyncio.sleep(2)
+            await interaction.channel.delete()
+        else:
+            await interaction.response.send_message("❌ This is not a ticket channel.", ephemeral=True)
+
+# Giveaway
+@client.tree.command(name="giveaway", description="Start a giveaway")
+@app_commands.describe(duration="How long? (e.g. 1h, 30m, 2d)", winners="Number of winners", prize="What are they winning?")
+async def giveaway(interaction: discord.Interaction, duration: str, winners: int, prize: str):
+    try:
+        if duration.endswith("h"): seconds = int(duration[:-1]) * 3600
+        elif duration.endswith("m"): seconds = int(duration[:-1]) * 60
+        elif duration.endswith("d"): seconds = int(duration[:-1]) * 86400
+        else: seconds = int(duration)
+    except:
+        return await interaction.response.send_message("❌ Invalid duration format (use 1h, 30m, 2d)", ephemeral=True)
+    end_time = datetime.utcnow() + timedelta(seconds=seconds)
+    embed = discord.Embed(title="🎉 **GIVEAWAY** 🎉", description=f"**Prize:** {prize}\n**Winners:** {winners}\n**Ends:** <t:{int(end_time.timestamp())}:R>", color=discord.Color.gold())
+    embed.set_footer(text=f"Hosted by {interaction.user}")
+    msg = await interaction.channel.send(embed=embed)
+    await msg.add_reaction("🎉")
+    await interaction.response.send_message(f"✅ Giveaway started! Ends in {duration}.", ephemeral=True)
+    await asyncio.sleep(seconds)
+    msg = await interaction.channel.fetch_message(msg.id)
+    reaction = discord.utils.get(msg.reactions, emoji="🎉")
+    if reaction:
+        users = [user async for user in reaction.users() if not user.bot]
+        if len(users) >= winners:
+            winners_list = random.sample(users, winners)
+            await interaction.channel.send(f"🎉 **GIVEAWAY ENDED!** Winners: {', '.join(u.mention for u in winners_list)}")
+
+# Fixed Sync Command
 @client.tree.command(name="sync", description="Force sync all slash commands (Owner only)")
 async def sync_commands(interaction: discord.Interaction):
     if interaction.user.id != 584241050973896736:
         return await interaction.response.send_message("❌ You are not the bot owner.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send("🔄 Syncing commands...", ephemeral=True)
+    await interaction.followup.send("🔄 Syncing commands... Please wait.", ephemeral=True)
     try:
         await client.tree.sync()
         await client.tree.sync(guild=interaction.guild)
-        await interaction.followup.send("✅ All commands synced!", ephemeral=True)
+        await interaction.followup.send("✅ All slash commands have been synced successfully!", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Sync failed: {e}", ephemeral=True)
 
-# Automod command (same as before)
-@client.tree.command(name="automod", description="Manage AutoMod")
+# Automod Command
+@client.tree.command(name="automod", description="Manage AutoMod settings")
 @app_commands.choices(action=[
     app_commands.Choice(name="Toggle On/Off", value="toggle"),
     app_commands.Choice(name="Add banned word", value="addword"),
@@ -114,24 +186,72 @@ async def sync_commands(interaction: discord.Interaction):
     app_commands.Choice(name="List banned words", value="list")
 ])
 async def automod_cmd(interaction: discord.Interaction, action: str, word: str = None):
-    # (same automod code as before)
     if interaction.guild is None: return await interaction.response.send_message("❌ Only in servers.", ephemeral=True)
     gid = interaction.guild.id
     if gid not in client.automod_config:
         client.automod_config[gid] = {"enabled": True, "bad_words": []}
     cfg = client.automod_config[gid]
+
     if action == "toggle":
         cfg["enabled"] = not cfg["enabled"]
         await client.save_config()
         status = "✅ **Enabled**" if cfg["enabled"] else "❌ **Disabled**"
         await interaction.response.send_message(f"AutoMod is now {status}", ephemeral=True)
-    # ... (addword, removeword, list are the same)
+    elif action == "addword" and word:
+        cfg["bad_words"].append(word.lower())
+        await client.save_config()
+        await interaction.response.send_message(f"✅ Added banned word: `{word}`", ephemeral=True)
+    elif action == "removeword" and word:
+        if word.lower() in cfg["bad_words"]:
+            cfg["bad_words"].remove(word.lower())
+            await client.save_config()
+            await interaction.response.send_message(f"✅ Removed `{word}`", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Word not found.", ephemeral=True)
+    elif action == "list":
+        words = cfg.get("bad_words", [])
+        await interaction.response.send_message(f"**Banned words:** {'`, `'.join(words) if words else 'None'}", ephemeral=True)
 
-# ====================== LOGGING EVENTS (This was missing) ======================
+# ====================== EVENTS (LOGGING + AUTOMOD) ======================
 @client.event
 async def on_ready():
     await client.load_config()
     print(f"✅ {client.user} is online and fully loaded!")
+    print("   Logging + AutoMod + All features are active!")
+
+@client.event
+async def on_message(message: discord.Message):
+    if message.author.bot or message.guild is None: return
+
+    # AutoMod
+    gid = message.guild.id
+    if gid in client.automod_config and client.automod_config[gid]["enabled"]:
+        cfg = client.automod_config[gid]
+        content = message.content.lower()
+
+        # Bad words
+        for word in cfg.get("bad_words", []):
+            if word in content:
+                await message.delete()
+                try:
+                    await message.author.timeout(timedelta(minutes=10), reason="Bad word")
+                except:
+                    pass
+                log_ch = client.get_log_channel(message.guild, "automod")
+                if log_ch:
+                    embed = discord.Embed(title="🚫 AutoMod: Bad Word", color=discord.Color.dark_red())
+                    embed.add_field(name="User", value=message.author.mention)
+                    embed.add_field(name="Word", value=word)
+                    embed.add_field(name="Channel", value=message.channel.mention)
+                    await log_ch.send(embed=embed)
+                return
+
+        # Anti-invite
+        if re.search(r"discord\.(gg|com/invite|app\.com/invite)", content):
+            await message.delete()
+            log_ch = client.get_log_channel(message.guild, "automod")
+            if log_ch:
+                await log_ch.send(f"🚫 **AutoMod**: Invite link deleted from {message.author.mention}")
 
 @client.event
 async def on_message_delete(message: discord.Message):
@@ -141,7 +261,7 @@ async def on_message_delete(message: discord.Message):
     embed = discord.Embed(title="🗑️ Message Deleted", color=discord.Color.red())
     embed.add_field(name="Author", value=message.author.mention, inline=True)
     embed.add_field(name="Channel", value=message.channel.mention, inline=True)
-    embed.add_field(name="Content", value=message.content[:1000] or "*No text*", inline=False)
+    embed.add_field(name="Content", value=message.content[:1000] or "*No text content*", inline=False)
     embed.timestamp = datetime.utcnow()
     await channel.send(embed=embed)
 
@@ -159,15 +279,84 @@ async def on_member_join(member: discord.Member):
 async def on_member_remove(member: discord.Member):
     channel = client.get_log_channel(member.guild, "joinleave")
     if channel:
-        embed = discord.Embed(title="❌ Member Left", color=discord.Color.orange())
+        embed = discord.Embed(title="❌ Member Left / Kicked", color=discord.Color.orange())
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="User", value=f"{member.mention} (`{member.name}`)", inline=False)
         embed.timestamp = datetime.utcnow()
         await channel.send(embed=embed)
 
-# (Role changes, timeouts, voice, nickname, channel updates, etc. are all included in the full version)
+@client.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    guild = after.guild
+    # Role changes
+    if before.roles != after.roles:
+        channel = client.get_log_channel(guild, "role")
+        if channel:
+            added = [r for r in after.roles if r not in before.roles]
+            removed = [r for r in before.roles if r not in after.roles]
+            embed = discord.Embed(title="🔄 Roles Updated", color=discord.Color.blue())
+            embed.add_field(name="Member", value=after.mention, inline=False)
+            if added: embed.add_field(name="Added", value=", ".join(r.mention for r in added), inline=False)
+            if removed: embed.add_field(name="Removed", value=", ".join(r.mention for r in removed), inline=False)
+            embed.timestamp = datetime.utcnow()
+            await channel.send(embed=embed)
 
-# Keep-alive
+    # Timeout changes
+    if before.timed_out_until != after.timed_out_until:
+        channel = client.get_log_channel(guild, "timeout")
+        if channel:
+            if after.timed_out_until:
+                embed = discord.Embed(title="⏳ Member Timed Out", color=discord.Color.red())
+                embed.add_field(name="Member", value=after.mention)
+                embed.add_field(name="Until", value=after.timed_out_until.strftime("%b %d %H:%M UTC"))
+            else:
+                embed = discord.Embed(title="✅ Timeout Removed", color=discord.Color.green())
+                embed.add_field(name="Member", value=after.mention)
+            embed.timestamp = datetime.utcnow()
+            await channel.send(embed=embed)
+
+# Voice Activity
+@client.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    channel = client.get_log_channel(member.guild, "voice")
+    if not channel: return
+    if before.channel is None and after.channel is not None:
+        embed = discord.Embed(title="🔊 Joined Voice", color=discord.Color.teal())
+        embed.add_field(name="Member", value=member.mention)
+        embed.add_field(name="Channel", value=after.channel.mention)
+    elif before.channel is not None and after.channel is None:
+        embed = discord.Embed(title="🔇 Left Voice", color=discord.Color.grey())
+        embed.add_field(name="Member", value=member.mention)
+        embed.add_field(name="Channel", value=before.channel.mention)
+    else:
+        return
+    embed.timestamp = datetime.utcnow()
+    await channel.send(embed=embed)
+
+# Reaction Role Handler
+@client.event
+async def on_raw_reaction_add(payload):
+    if payload.message_id not in client.reaction_roles: return
+    guild = client.get_guild(payload.guild_id)
+    if not guild: return
+    role_id = client.reaction_roles[payload.message_id].get(str(payload.emoji))
+    if role_id:
+        member = await guild.fetch_member(payload.user_id)
+        role = guild.get_role(role_id)
+        if role: await member.add_roles(role)
+
+@client.event
+async def on_raw_reaction_remove(payload):
+    if payload.message_id not in client.reaction_roles: return
+    guild = client.get_guild(payload.guild_id)
+    if not guild: return
+    role_id = client.reaction_roles[payload.message_id].get(str(payload.emoji))
+    if role_id:
+        member = await guild.fetch_member(payload.user_id)
+        role = guild.get_role(role_id)
+        if role: await member.remove_roles(role)
+
+# Keep-alive + Run
 import os
 from flask import Flask
 import threading
