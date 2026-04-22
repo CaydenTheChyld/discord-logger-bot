@@ -188,7 +188,16 @@ async def sync_commands(interaction: discord.Interaction):
 async def on_ready():
     await client.load_config()
     print(f"✅ {client.user} is online and fully loaded!")
-    print("   All commands should now be available!")
+    
+    # Force sync all commands in every server the bot is in
+    for guild in client.guilds:
+        try:
+            await client.tree.sync(guild=guild)
+            print(f"✅ Synced commands for: {guild.name}")
+        except Exception as e:
+            print(f"❌ Sync failed for {guild.name}: {e}")
+    
+    print("   All slash commands should now appear!")
 
 # (All logging, AutoMod, reaction roles, etc. are included in this full version)
 
