@@ -150,14 +150,12 @@ async def giveaway(interaction: discord.Interaction, duration: str, winners: int
         else: seconds = int(duration)
     except:
         return await interaction.response.send_message("❌ Invalid duration format (use 1h, 30m, 2d)", ephemeral=True)
-
     end_time = datetime.utcnow() + timedelta(seconds=seconds)
     embed = discord.Embed(title="🎉 **GIVEAWAY** 🎉", description=f"**Prize:** {prize}\n**Winners:** {winners}\n**Ends:** <t:{int(end_time.timestamp())}:R>", color=discord.Color.gold())
     embed.set_footer(text=f"Hosted by {interaction.user}")
     msg = await interaction.channel.send(embed=embed)
     await msg.add_reaction("🎉")
     await interaction.response.send_message(f"✅ Giveaway started! Ends in {duration}.", ephemeral=True)
-
     await asyncio.sleep(seconds)
     msg = await interaction.channel.fetch_message(msg.id)
     reaction = discord.utils.get(msg.reactions, emoji="🎉")
@@ -189,9 +187,9 @@ async def on_ready():
     await client.load_config()
     print(f"✅ {client.user} is online and fully loaded!")
     
-    # Force global + server sync
+    print("🔄 Starting force command sync...")
     try:
-        await client.tree.sync()                    # Global sync
+        await client.tree.sync()
         print("✅ Global command sync completed")
     except Exception as e:
         print(f"Global sync failed: {e}")
@@ -199,7 +197,7 @@ async def on_ready():
     for guild in client.guilds:
         try:
             await client.tree.sync(guild=guild)
-            print(f"✅ Synced commands for server: {guild.name}")
+            print(f"✅ Synced commands for: {guild.name}")
         except Exception as e:
             print(f"Server sync failed for {guild.name}: {e}")
     
