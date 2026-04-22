@@ -189,17 +189,21 @@ async def on_ready():
     await client.load_config()
     print(f"✅ {client.user} is online and fully loaded!")
     
-    # Force sync all commands in every server the bot is in
+    # Force global + server sync
+    try:
+        await client.tree.sync()                    # Global sync
+        print("✅ Global command sync completed")
+    except Exception as e:
+        print(f"Global sync failed: {e}")
+
     for guild in client.guilds:
         try:
             await client.tree.sync(guild=guild)
-            print(f"✅ Synced commands for: {guild.name}")
+            print(f"✅ Synced commands for server: {guild.name}")
         except Exception as e:
-            print(f"❌ Sync failed for {guild.name}: {e}")
+            print(f"Server sync failed for {guild.name}: {e}")
     
-    print("   All slash commands should now appear!")
-
-# (All logging, AutoMod, reaction roles, etc. are included in this full version)
+    print("   All commands should now be visible!")
 
 # Keep-alive + Run
 # ====================== KEEP-ALIVE + RUN BOT ======================
