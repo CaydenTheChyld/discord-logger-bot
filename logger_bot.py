@@ -3,7 +3,6 @@ from discord import app_commands
 import json
 import os
 from datetime import datetime, timedelta
-import re
 import asyncio
 import random
 
@@ -51,8 +50,6 @@ class LoggingBot(discord.Client):
 client = LoggingBot()
 
 # ====================== COMMANDS ======================
-# (All your existing commands are here - I kept them exactly as you had)
-
 @client.tree.command(name="setlog", description="Set log channel")
 @app_commands.choices(log_type=[app_commands.Choice(name=n, value=v) for n, v in [
     ("Deleted Messages", "message"), ("Message Edits", "edit"), ("Bulk Deletes", "bulk"),
@@ -89,7 +86,6 @@ async def stats(interaction: discord.Interaction):
     embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
     await interaction.response.send_message(embed=embed)
 
-# Reaction Roles, Ticket, Giveaway, Sync (same as before)
 @client.tree.command(name="reactionrole", description="Create a reaction role message")
 @app_commands.describe(emoji="Emoji to react with", role="Role to give")
 async def reactionrole(interaction: discord.Interaction, emoji: str, role: discord.Role):
@@ -103,6 +99,7 @@ async def reactionrole(interaction: discord.Interaction, emoji: str, role: disco
     await client.save_config()
     await interaction.response.send_message(f"✅ Reaction role created! React with {emoji} to get **{role.name}**.", ephemeral=True)
 
+# Ticket System
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -110,12 +107,16 @@ class TicketView(discord.ui.View):
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild = interaction.guild
         member = interaction.user
-        ticket_channel = await guild.create_text_channel(f"ticket-{member.name}", topic=f"Ticket for {member.name}", overwrites={
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        })
-        await ticket_channel.send(f"{member.mention} Welcome to your ticket! Use `/ticket close` when done.")
+        ticket_channel = await guild.create_text_channel(
+            f"ticket-{member.name}",
+            topic=f"Ticket for {member.name} | Created: {datetime.utcnow().strftime('%Y-%m-%d')}",
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+            }
+        )
+        await ticket_channel.send(f"{member.mention} Welcome to your ticket!\nUse `/ticket close` when done.")
         await interaction.response.send_message(f"✅ Ticket created: {ticket_channel.mention}", ephemeral=True)
 
 @client.tree.command(name="ticket", description="Ticket commands")
@@ -123,7 +124,7 @@ class TicketView(discord.ui.View):
 async def ticket_cmd(interaction: discord.Interaction, action: str):
     if interaction.guild is None: return await interaction.response.send_message("❌ Only in servers.", ephemeral=True)
     if action == "setup":
-        embed = discord.Embed(title="Support Tickets", description="Click below to open a ticket!", color=discord.Color.blue())
+        embed = discord.Embed(title="Support Tickets", description="Click the button below to open a ticket!", color=discord.Color.blue())
         await interaction.channel.send(embed=embed, view=TicketView())
         await interaction.response.send_message("✅ Ticket panel created!", ephemeral=True)
     elif action == "close":
@@ -131,7 +132,10 @@ async def ticket_cmd(interaction: discord.Interaction, action: str):
             await interaction.response.send_message("✅ Closing ticket...", ephemeral=True)
             await asyncio.sleep(2)
             await interaction.channel.delete()
+        else:
+            await interaction.response.send_message("❌ This is not a ticket channel.", ephemeral=True)
 
+# Giveaway
 @client.tree.command(name="giveaway", description="Start a giveaway")
 @app_commands.describe(duration="How long? (e.g. 1h, 30m, 2d)", winners="Number of winners", prize="What are they winning?")
 async def giveaway(interaction: discord.Interaction, duration: str, winners: int, prize: str):
@@ -141,13 +145,13 @@ async def giveaway(interaction: discord.Interaction, duration: str, winners: int
         elif duration.endswith("d"): seconds = int(duration[:-1]) * 86400
         else: seconds = int(duration)
     except:
-        return await interaction.response.send_message("❌ Invalid duration (use 1h, 30m, 2d)", ephemeral=True)
+        return await interaction.response.send_message("❌ Invalid duration format (use 1h, 30m, 2d)", ephemeral=True)
     end_time = datetime.utcnow() + timedelta(seconds=seconds)
     embed = discord.Embed(title="🎉 **GIVEAWAY** 🎉", description=f"**Prize:** {prize}\n**Winners:** {winners}\n**Ends:** <t:{int(end_time.timestamp())}:R>", color=discord.Color.gold())
     embed.set_footer(text=f"Hosted by {interaction.user}")
     msg = await interaction.channel.send(embed=embed)
     await msg.add_reaction("🎉")
-    await interaction.response.send_message(f"✅ Giveaway started!", ephemeral=True)
+    await interaction.response.send_message(f"✅ Giveaway started! Ends in {duration}.", ephemeral=True)
     await asyncio.sleep(seconds)
     msg = await interaction.channel.fetch_message(msg.id)
     reaction = discord.utils.get(msg.reactions, emoji="🎉")
@@ -157,16 +161,21 @@ async def giveaway(interaction: discord.Interaction, duration: str, winners: int
             winners_list = random.sample(users, winners)
             await interaction.channel.send(f"🎉 **GIVEAWAY ENDED!** Winners: {', '.join(u.mention for u in winners_list)}")
 
+# Fixed Sync Command
 @client.tree.command(name="sync", description="Force sync all slash commands (Owner only)")
 async def sync_commands(interaction: discord.Interaction):
     if interaction.user.id != 584241050973896736:
         return await interaction.response.send_message("❌ You are not the bot owner.", ephemeral=True)
-    await interaction.response.send_message("🔄 Syncing...", ephemeral=True)
+    
+    await interaction.response.defer(ephemeral=True)   # ← This fixes the 404 error
+    await interaction.followup.send("🔄 Syncing commands... Please wait.", ephemeral=True)
+    
     try:
+        await client.tree.sync()
         await client.tree.sync(guild=interaction.guild)
-        await interaction.followup.send("✅ Commands synced!", ephemeral=True)
+        await interaction.followup.send("✅ All slash commands have been synced successfully!", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Sync failed: {e}", ephemeral=True)
 
 # ====================== AUTOMOD COMMAND ======================
 @client.tree.command(name="automod", description="Manage AutoMod settings")
@@ -211,7 +220,7 @@ async def automod_cmd(interaction: discord.Interaction, action: str, word: str =
 async def on_ready():
     await client.load_config()
     print(f"✅ {client.user} is online and fully loaded!")
-    print("🔄 All commands should now be available!")
+    print("   All commands should now be available!")
 
 # Keep-alive + Run
 import os
